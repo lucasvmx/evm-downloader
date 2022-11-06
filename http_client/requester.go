@@ -2,24 +2,19 @@ package http_client
 
 import (
 	"encoding/json"
-	"fmt"
+	"evm-downloader/model"
 	"io"
 	"log"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
-	"urna-downloader/model"
 )
 
 var (
-	urlBaseFiles       = "https://resultados.tse.jus.br/oficial/{ELEICAO}/arquivo-urna/{TURNO}/dados/{SIGLA_MUNICIPIO}/{CODIGO_MUNICIPIO}/{ZONA}/{SECAO}/p000{TURNO}-{SIGLA_MUNICIPIO}-m{CODIGO_MUNICIPIO}-z{ZONA}-s{SECAO}-aux.json"
-	zonesSectionsURL   = "https://resultados.tse.jus.br/oficial/{ELEICAO}/arquivo-urna/{TURNO}/config/{ESTADO}/{ESTADO}-p000{TURNO}-cs.json"
-	singleVscmrFileURL = "https://resultados.tse.jus.br/oficial/{ELEICAO}/arquivo-urna/{TURNO}/dados/{ESTADO}/{CODIGO_MUNICIPIO}/{ZONA}/{SECAO}/{HASH}/{FILENAME}"
-)
-
-var (
-	fullDataSize int64 = 0
+	fullDataSize  int64 = 0
+	lastStateInfo []model.Estado
+	lastState     string
 )
 
 func getTurno(turno int) (nomeTurno string) {
@@ -42,6 +37,8 @@ func readBody(resp *http.Response) []byte {
 }
 
 func compileZonesSectionsURL(nomeEleicao, turno, estado string) (url string) {
+	var zonesSectionsURL string = "https://resultados.tse.jus.br/oficial/{ELEICAO}/arquivo-urna/{TURNO}/config/{ESTADO}/{ESTADO}-p000{TURNO}-cs.json"
+
 	url = strings.ReplaceAll(zonesSectionsURL, "{ELEICAO}", nomeEleicao)
 	url = strings.ReplaceAll(url, "{TURNO}", turno)
 	url = strings.ReplaceAll(url, "{ESTADO}", estado)
@@ -50,6 +47,8 @@ func compileZonesSectionsURL(nomeEleicao, turno, estado string) (url string) {
 }
 
 func compileURLForFile(nomeEleicao, turno, estado, cod_mun, zona, secao, hash, filename string) (url string) {
+	var singleVscmrFileURL string = "https://resultados.tse.jus.br/oficial/{ELEICAO}/arquivo-urna/{TURNO}/dados/{ESTADO}/{CODIGO_MUNICIPIO}/{ZONA}/{SECAO}/{HASH}/{FILENAME}"
+
 	url = strings.ReplaceAll(singleVscmrFileURL, "{ELEICAO}", nomeEleicao)
 	url = strings.ReplaceAll(url, "{TURNO}", turno)
 	url = strings.ReplaceAll(url, "{ESTADO}", estado)
@@ -63,6 +62,7 @@ func compileURLForFile(nomeEleicao, turno, estado, cod_mun, zona, secao, hash, f
 }
 
 func compileURLForfiles(nomeEleicao, turno, estado, cod_mun, sigla_mun, secao, zona string) (url string) {
+	var urlBaseFiles string = "https://resultados.tse.jus.br/oficial/{ELEICAO}/arquivo-urna/{TURNO}/dados/{SIGLA_MUNICIPIO}/{CODIGO_MUNICIPIO}/{ZONA}/{SECAO}/p000{TURNO}-{SIGLA_MUNICIPIO}-m{CODIGO_MUNICIPIO}-z{ZONA}-s{SECAO}-aux.json"
 
 	url = strings.ReplaceAll(urlBaseFiles, "{ELEICAO}", nomeEleicao)
 	url = strings.ReplaceAll(url, "{TURNO}", turno)
@@ -89,17 +89,17 @@ func DownloadBasicInfo() (basicInfo *model.InfoBasica) {
 
 	resp, fail := http.Get(statesInfoURL)
 	if fail != nil {
-		log.Fatalf("[!] failed to send GET for %v: %v", statesInfoURL, fail)
+		log.Fatalf("[!] falha ao enviar GET para %v: %v", statesInfoURL, fail)
 	}
 
 	body := readBody(resp)
 	if body == nil {
-		log.Fatalf("[!] can't read body")
+		log.Fatalf("[!] erro ao ler body da request")
 	}
 
 	fail = json.Unmarshal(body, &basicInfo)
 	if fail != nil {
-		log.Fatalf("[!] couldn't decode states information: %v", fail)
+		log.Fatalf("[!] falha ao decodificar informacoes: %v", fail)
 	}
 
 	return
@@ -109,20 +109,40 @@ func DownloadBasicInfo() (basicInfo *model.InfoBasica) {
 func DownloadZonesSectionsInfo(state model.Estado, mun model.Municipio) (zones []model.Zona) {
 	var info *model.InfoBasica
 
+	if state.Cd == lastState {
+		for _, _state := range lastStateInfo {
+			for _, _mun := range _state.Mu {
+				if _mun.Cd == mun.Cd {
+					zones = _mun.Zon
+					lastState = _state.Cd
+					return
+				}
+			}
+		}
+	} else {
+		log.Printf("[*] baixando dados do Estado: %v", state.Cd)
+	}
+
 	s := compileZonesSectionsURL("ele2022", getTurno(model.SegundoTurno), strings.ToLower(state.Cd))
 
 	resp, err := http.Get(s)
 	if err != nil {
-		log.Fatalf("[!] failed to download zones sections information: %v", err)
+		log.Fatalf("[!] erro ao baixar dados das secoes: %v", err)
 	}
 
 	data := readBody(resp)
-	json.Unmarshal(data, &info)
+	err = json.Unmarshal(data, &info)
+	if err != nil {
+		log.Fatalf("[!] erro ao decodificar body da requisicao")
+	}
 
-	for _, q := range info.Abr {
-		for _, s := range q.Mu {
-			if s.Cd == mun.Cd {
-				zones = s.Zon
+	lastStateInfo = info.Abr
+
+	for _, _state := range info.Abr {
+		for _, _mun := range _state.Mu {
+			if _mun.Cd == mun.Cd {
+				zones = _mun.Zon
+				lastState = _state.Cd
 				return
 			}
 		}
@@ -138,7 +158,7 @@ func getResourceInfo(url string) (info *model.ResourceInfo) {
 
 	resp, fail := http.Head(url)
 	if fail != nil {
-		log.Fatalf("[!] failed to get resource info")
+		log.Fatalf("[!] falha ao obter dados do recurso remoto: %v", fail)
 	}
 
 	contentLength := resp.Header.Get("Content-Length")
@@ -147,18 +167,20 @@ func getResourceInfo(url string) (info *model.ResourceInfo) {
 	return
 }
 
-func downloadVscmrFile(fileURL, estado, cod_mun, zona, secao string) {
+func getVscmrFileURL(fileURL, estado, cod_mun, zona, secao string) (remoteFileURL, localFilename string) {
 	var files *model.Files
 
-	resp, fail := http.Get(fileURL)
+	customClient := &http.Client{}
+
+	resp, fail := customClient.Get(fileURL)
 	if fail != nil {
-		log.Fatalf("[!] failed to send request: %v", fail)
+		log.Fatalf("[!] falha ao enviar request: %v", fail)
 	}
 
 	data := readBody(resp)
 	fail = json.Unmarshal(data, &files)
 	if fail != nil {
-		log.Fatalf("[!] failed to decode data: %v", fail)
+		log.Fatalf("[!] falha ao decodificar dados: %v (%v)", fail, fileURL)
 	}
 
 	hash := files.Hashes[0].Hash
@@ -176,36 +198,36 @@ func downloadVscmrFile(fileURL, estado, cod_mun, zona, secao string) {
 		}
 	}
 
-	remoteFileURL := compileURLForFile("ele2022", getTurno(model.SegundoTurno), strings.ToLower(estado), cod_mun, zona, secao, hash, filename)
+	remoteFileURL = compileURLForFile("ele2022", getTurno(model.SegundoTurno), strings.ToLower(estado), cod_mun, zona, secao, hash, filename)
+	localFilename = filename
+	return
+}
 
-	resInfo := getResourceInfo(remoteFileURL)
+func downloadVscmrFile(fileURL, localFilename string) {
+	customClient := &http.Client{}
+	resp, fail := customClient.Get(fileURL)
+	if fail != nil {
+		log.Fatalf("[!] erro ao enviar request: %v", fail)
+	}
 
+	fileData := readBody(resp)
+	os.WriteFile(localFilename, fileData, os.ModePerm)
+
+	// Obtém o tamanho do download a ser realizado
+	resInfo := getResourceInfo(fileURL)
 	fullDataSize += resInfo.ContentLength
 }
 
 func DownloadVscmrFiles() {
 
-	// Faz o download das informações básicas dos Estados
-	basicInfo := DownloadBasicInfo()
+	// Realiza o mapeamento dos arquivos
+	CreateURLMap()
 
-	// Para cada estado, listar os municípios e para cada município listar as zonas eleitorais
-	for _, state := range basicInfo.Abr {
-		for _, mun := range state.Mu {
-			log.Printf("[+] processando seções e zonas de %v - %v ...", mun.Nm, state.Ds)
+	// Faz o Download para o local atual
+	for key, url := range urlMap {
+		localFile := strings.Split(key, "|")[1]
+		downloadVscmrFile(url, localFile)
 
-			zonesList := DownloadZonesSectionsInfo(state, mun)
-
-			for _, zone := range zonesList {
-				for _, section := range zone.Sec {
-					url := compileURLForfiles("ele2022", getTurno(model.SegundoTurno), strings.ToLower(state.Cd), mun.Cd, strings.ToLower(state.Cd), section.Ns, zone.Cd)
-					downloadVscmrFile(url, strings.ToLower(state.Cd), mun.Cd, zone.Cd, section.Ns)
-				}
-			}
-		}
-		log.Printf("Tamanho dos dados (parcial): %v MB", fullDataSize/1024/1024)
+		log.Printf("[*] baixado: %.2f KB", float64(fullDataSize/1024.0))
 	}
-
-	dados := fmt.Sprintf("Tamanho total dos dados: %v KB", fullDataSize/1024)
-
-	os.WriteFile("output.txt", []byte(dados), 0777)
 }
