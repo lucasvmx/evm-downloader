@@ -1,7 +1,8 @@
 package main
 
-import "urna-downloader/http_client"
+import "evm-downloader/http_client"
 
 func main() {
+	http_client.Initialize()
 	http_client.DownloadVscmrFiles()
 }
