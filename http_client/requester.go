@@ -142,7 +142,6 @@ func getResourceInfo(url string) (info *model.ResourceInfo) {
 	}
 
 	contentLength := resp.Header.Get("Content-Length")
-	log.Printf("len: %v", contentLength)
 	v, _ := strconv.ParseInt(contentLength, 10, 64)
 	info.ContentLength = v
 	return
