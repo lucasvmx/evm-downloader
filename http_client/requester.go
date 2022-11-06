@@ -220,14 +220,9 @@ func downloadVscmrFile(fileURL, localFilename string) {
 
 func DownloadVscmrFiles() {
 
+	// Cria a thread de download dos arquivos
+	go PerformDownload()
+
 	// Realiza o mapeamento dos arquivos
 	CreateURLMap()
-
-	// Faz o Download para o local atual
-	for key, url := range urlMap {
-		localFile := strings.Split(key, "|")[1]
-		downloadVscmrFile(url, localFile)
-
-		log.Printf("[*] baixado: %.2f KB", float64(fullDataSize/1024.0))
-	}
 }
