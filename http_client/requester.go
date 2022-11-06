@@ -2,9 +2,11 @@ package http_client
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"urna-downloader/model"
@@ -44,7 +46,6 @@ func compileZonesSectionsURL(nomeEleicao, turno, estado string) (url string) {
 	url = strings.ReplaceAll(url, "{TURNO}", turno)
 	url = strings.ReplaceAll(url, "{ESTADO}", estado)
 
-	log.Printf("[*] compiled url: %v", url)
 	return
 }
 
@@ -58,7 +59,6 @@ func compileURLForFile(nomeEleicao, turno, estado, cod_mun, zona, secao, hash, f
 	url = strings.ReplaceAll(url, "{HASH}", hash)
 	url = strings.ReplaceAll(url, "{FILENAME}", filename)
 
-	log.Printf("[*] compiled url (single file): %v", url)
 	return
 }
 
@@ -72,15 +72,12 @@ func compileURLForfiles(nomeEleicao, turno, estado, cod_mun, sigla_mun, secao, z
 	url = strings.ReplaceAll(url, "{ZONA}", zona)
 	url = strings.ReplaceAll(url, "{SECAO}", secao)
 
-	//log.Printf("[*] compiled url (for files): %v", url)
-
 	return
 }
 
 func PrintStatesInfo(basicInfo *model.InfoBasica) {
 	states := basicInfo.Abr
 	for _, state := range states {
-		log.Printf("Estado: %v (%v)", state.Cd, state.Ds)
 		for _, mun := range state.Mu {
 			log.Printf("==> %v", mun.Nm)
 		}
@@ -183,7 +180,6 @@ func downloadVscmrFile(fileURL, estado, cod_mun, zona, secao string) {
 	remoteFileURL := compileURLForFile("ele2022", getTurno(model.SegundoTurno), strings.ToLower(estado), cod_mun, zona, secao, hash, filename)
 
 	resInfo := getResourceInfo(remoteFileURL)
-	log.Printf("[*] downloading %v bytes of data", resInfo.ContentLength)
 
 	fullDataSize += resInfo.ContentLength
 }
@@ -207,7 +203,10 @@ func DownloadVscmrFiles() {
 				}
 			}
 		}
+		log.Printf("Tamanho dos dados (parcial): %v MB", fullDataSize/1024/1024)
 	}
 
-	log.Printf("Tamanho total dos dados: %v KBytes", fullDataSize/1024)
+	dados := fmt.Sprintf("Tamanho total dos dados: %v KB", fullDataSize/1024)
+
+	os.WriteFile("output.txt", []byte(dados), 0777)
 }
